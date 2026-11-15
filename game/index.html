@@ -50,7 +50,7 @@
   #hitmarker i:nth-child(3) { top: 14px; left: 0; height: 2px; width: 9px; }
   #hitmarker i:nth-child(4) { top: 14px; right: 0; height: 2px; width: 9px; }
 
-  #minimap { position: fixed; left: 16px; top: 16px; border: 1px solid var(--hairline); border-radius: var(--radius); background: rgba(16,18,22,.82); }
+  #minimap { position: fixed; left: 16px; top: 16px; border: 2px solid var(--hairline); border-radius: 50%; background: rgba(16,18,22,.82); }
 
   #topbar { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); text-align: center; font-family: var(--font-readout); }
   #timer { font-size: 26px; font-weight: 600; letter-spacing: .04em; text-shadow: 0 1px 3px #000; }
@@ -65,6 +65,10 @@
   #killfeed div { background: rgba(16,18,22,.8); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 3px 8px; }
   #killfeed .vg { color: var(--accent2); } #killfeed .hw { color: var(--danger); }
   #killfeed .hs { color: var(--accent); }
+
+  #callout { position: fixed; right: 16px; top: 150px; max-width: 320px; text-align: right; font-size: 13px; font-family: var(--font-readout); color: var(--ink); background: rgba(16,18,22,.82); border: 1px solid var(--hairline); border-radius: var(--radius); padding: 5px 9px; opacity: 0; transition: opacity 200ms linear; }
+  #callout.show { opacity: 1; }
+  #callout.vg { border-left: 3px solid var(--accent2); } #callout.hw { border-left: 3px solid var(--danger); }
 
   #vitals { position: fixed; left: 16px; bottom: 16px; font-family: var(--font-readout); }
   #hpbar { width: 220px; height: 10px; background: #101216; border: 1px solid var(--hairline); border-radius: 2px; overflow: hidden; }
@@ -81,6 +85,7 @@
   #ammo.empty #ammo-mag { color: var(--danger); }
   #ammo-reserve { font-size: 16px; color: var(--muted); }
   #reloadhint { font-size: 12px; color: var(--accent); margin-top: 2px; }
+  #grenades { font-size: 12px; color: var(--muted); margin-top: 2px; letter-spacing: .05em; }
 
   #banner { position: fixed; left: 50%; top: 24%; transform: translateX(-50%); text-align: center; opacity: 0; transition: opacity 180ms linear; }
   #banner.show { opacity: 1; }
@@ -135,7 +140,7 @@
   <div id="dmg"></div>
   <div id="flash"></div>
   <div id="scope"></div>
-  <canvas id="minimap" width="176" height="132"></canvas>
+  <canvas id="minimap" width="132" height="132"></canvas>
   <div id="topbar">
     <div id="timer">1:40</div>
     <div id="teamscore"><span class="vg">VANGUARD <b id="score-vg">0</b></span> — <span class="hw">HOLLOW <b id="score-hw">0</b></span></div>
@@ -143,6 +148,7 @@
   </div>
   <div id="compass">N</div>
   <div id="killfeed"></div>
+  <div id="callout"></div>
   <div id="crosshair" class="spread"><i></i><i></i><i></i><i></i><i></i></div>
   <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
   <div id="vitals">
@@ -155,6 +161,7 @@
     <div id="weapon-name">VK-9 SIDEARM</div>
     <div id="ammo"><span id="ammo-mag">12</span><span id="ammo-reserve"> / 36</span></div>
     <div id="reloadhint"></div>
+    <div id="grenades"></div>
   </div>
   <div id="banner"><h2></h2><p></p></div>
   <div id="toast"></div>
@@ -166,7 +173,7 @@
     <h2>BUY EQUIPMENT <span style="color:var(--muted);font-size:14px">— freeze time</span></h2>
     <div id="buy-money">$800</div>
     <div class="shop" id="shop"></div>
-    <p style="margin:16px 0 0;font-size:13px;color:var(--muted)">Keys 1–9 buy, B or Esc closes. Weapons replace your primary; sidearm stays.</p>
+    <p style="margin:16px 0 0;font-size:13px;color:var(--muted)">Keys 1–9 and 0 buy, B or Esc closes. Weapons replace your primary; sidearm stays.</p>
   </section>
 </div>
 
