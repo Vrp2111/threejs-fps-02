@@ -23,9 +23,12 @@ lock, no input needed; the page renders, freezes, and sets
    | `3-play.jpg` | http://localhost:8081/index.html?shot=play&seed=7 |
    | `4-plant.jpg` | http://localhost:8081/index.html?shot=plant&seed=7 |
 3. Check each file: ≤ 256 KiB, 1280×720, and actually shows the game
-   (title screen / buy menu / mid-fight with tracer + hitmarker / bomb
-   planted at Site A with the banner). If a shot is black or the HUD is
-   wrong, tell the builder subagent — do not edit the image.
+   (title screen / buy menu / mid-fight with tracer + hitmarker and the two
+   Hollow bots clearly visible ahead / bomb planted at Site A with the
+   banner, the site ring and a teammate holding it). The play shot hides
+   the ROUND banner on purpose — it is a clean frame of the fight. If a
+   shot is black, the HUD is wrong, or the frame is mostly a wall, tell
+   the builder subagent — do not edit the image.
 4. Rebuild the dossier and confirm it still writes:
    ```
    rm -rf out && mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
