@@ -1,5 +1,7 @@
 // Small helpers shared by every module. No allocations in the hot path:
 // callers pass preallocated vectors into the ray and segment tests.
+import { POOLS } from './config.js';
+
 export function mulberry32(initial) {
   let a = initial | 0;
   return function random() {
@@ -14,13 +16,39 @@ export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
 export const damp = (a, b, lambda, dt) => lerp(a, b, 1 - Math.exp(-lambda * dt));
 
+// Molten pool test (E31): true when the centre (x,z) is inside a pool.
+export function inPool(x, z) {
+  for (const p of POOLS) {
+    const dx = x - p.x, dz = z - p.z;
+    if (dx * dx + dz * dz < p.r * p.r) return true;
+  }
+  return false;
+}
+
+// Push (x,z) out of circle (cx,cz,r) to the rim; centre exits east.
+export function pushOut(x, z, cx, cz, r) {
+  const dx = x - cx, dz = z - cz, d2 = dx * dx + dz * dz;
+  if (d2 >= r * r) return [x, z];
+  if (d2 < 0.0001) return [cx + r, z];
+  const d = Math.sqrt(d2);
+  return [cx + dx / d * r, cz + dz / d * r];
+}
+
+// Push (x,z) out of any pool it stands in, to the rim. Used by
+// pathfinding (no path ends in lava) and by bomb drops (a charge in lava
+// is lost).
+export function outOfPools(x, z) {
+  for (const p of POOLS) [x, z] = pushOut(x, z, p.x, p.z, p.r + 0.3);
+  return [x, z];
+}
+
 export function fmtTime(seconds) {
   const s = Math.max(0, Math.ceil(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 // Slab test: ray (ox,oy,oz) + t*dir against an axis-aligned box.
-// Returns the smallest t >= 0 of the hit, or Infinity. `out` is unused; kept
+// Returns smallest t >= 0 of the hit, or Infinity. `out` unused; kept
 // allocation-free by working on scalars only.
 export function rayBox(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX, maxY, maxZ, maxT) {
   let tmin = 0;

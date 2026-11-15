@@ -12,11 +12,13 @@ export function createHud() {
     hpfill: $('hpfill'), hpnum: $('hpnum-v'), armor: $('armorline'), money: $('moneyline'),
     weaponName: $('weapon-name'), ammo: $('ammo'), ammoMag: $('ammo-mag'),
     ammoRes: $('ammo-reserve'), reloadHint: $('reloadhint'),
+    grenades: $('grenades'),
     banner: $('banner'), bannerH: document.querySelector('#banner h2'),
     bannerP: document.querySelector('#banner p'),
     toast: $('toast'), progress: $('progress'),
     progressFill: document.querySelector('#progress .fill'),
     progressLabel: document.querySelector('#progress .label'),
+    callout: $('callout'),
     buyMenu: $('buymenu'), shop: $('shop'), buyMoney: $('buy-money'),
     overlay: $('overlay'), overlayTitle: $('overlay-title'),
     overlayCopy: $('overlay-copy'), playBtn: $('play'),
@@ -65,6 +67,11 @@ export function createHud() {
     el.ammo.classList.toggle('empty', mag === 0);
   }
   function setReloading(on) { setText(el.reloadHint, 'rl', on ? 'RELOADING…' : ''); }
+  // Grenade inventory under the ammo: the loadout at a glance, like the
+  // top entries show (Frag / Smoke / Flash counts next to the weapon).
+  function setGrenades(frag, smoke, flash, lava) {
+    setText(el.grenades, 'gr', `FRAG ${frag} · SMOKE ${smoke} · FLASH ${flash} · LAVA ${lava}`);
+  }
   function setCrosshairSpread(gapPx) {
     el.crosshair.style.setProperty('--gap', String(Math.round(gapPx)));
   }
@@ -94,10 +101,21 @@ export function createHud() {
     el.banner.className = 'show' + (cls ? ` ${cls}` : '');
     bannerTimer = 2.6;
   }
+  // Hide the banner at once: the deterministic screenshot staging needs a
+  // clean frame, not a banner across the middle of the action.
+  function hideBanner() { el.banner.className = ''; bannerTimer = 0; }
   function toast(msg) {
     el.toast.textContent = msg;
     el.toast.classList.add('show');
     toastTimer = 2.4;
+  }
+  // Radio callout: the plan speaking. One line under the killfeed, team
+  // coloured, held for 4 seconds so the player can read it while playing.
+  let calloutTimer = 0;
+  function callout(line, team) {
+    el.callout.textContent = `◉ ${line}`;
+    el.callout.className = 'show ' + (team === 'vanguard' ? 'vg' : 'hw');
+    calloutTimer = 4;
   }
   function showProgress(frac, label) {
     if (frac > 0) {
@@ -136,7 +154,7 @@ export function createHud() {
       const desc = it.id in WEAPONS ? `${WEAPONS[it.id].damage} dmg · ${WEAPONS[it.id].mag} mag` : it.desc;
       b.innerHTML = `<span class="nm">${it.name}${owned ? ' — EQUIPPED' : ''}</span><span class="ds">${desc}</span><span class="pr">$${it.price}</span>`;
       b.addEventListener('click', () => { if (buyCb) buyCb(it.id); });
-      b.dataset.key = String(i + 1);
+      b.dataset.key = i === 9 ? '0' : String(i + 1);
       el.shop.appendChild(b);
     });
   }
@@ -178,16 +196,19 @@ export function createHud() {
     }
   }
 
-  // Top-down minimap: walls, sites, the player (triangle), teammates (blue),
-  // and enemies the player can currently see (red).
+  // Top-down minimap: walls, sites, player (triangle), teammates (blue),
+  // visible enemies (red). Light slate background, dark slate walls, so
+  // the map reads at a glance instead of an empty dark box.
   function updateMinimap(world, playerPos, yaw, teammates, enemies, bomb) {
-    const W = 176, H = 132;
+    const W = 132, H = 132;
+    mm.save(); mm.beginPath(); mm.arc(66, 66, 66, 0, 7); mm.clip();
     mm.clearRect(0, 0, W, H);
-    mm.fillStyle = 'rgba(32,36,44,0.9)';
+    mm.fillStyle = 'rgba(226,232,238,0.92)';
     mm.fillRect(0, 0, W, H);
-    const sx = (x) => ((x - world.bounds.minX) / (world.bounds.maxX - world.bounds.minX)) * W;
-    const sz = (z) => ((z - world.bounds.minZ) / (world.bounds.maxZ - world.bounds.minZ)) * H;
-    mm.fillStyle = '#4a505c';
+    const b = world.bounds, k = W / (b.maxX - b.minX), oy = (H - (b.maxZ - b.minZ) * k) / 2;
+    const sx = (x) => (x - b.minX) * k;
+    const sz = (z) => (z - b.minZ) * k + oy;
+    mm.fillStyle = '#3a3f47';
     for (const c of world.colliders) {
       if (c.maxY < 0.5) continue;
       mm.fillRect(sx(c.minX), sz(c.minZ), Math.max(1, sx(c.maxX) - sx(c.minX)), Math.max(1, sz(c.maxZ) - sz(c.minZ)));
@@ -195,11 +216,14 @@ export function createHud() {
     // Sites
     mm.font = 'bold 11px monospace'; mm.textAlign = 'center'; mm.textBaseline = 'middle';
     mm.fillStyle = '#f0a830';
-    mm.beginPath(); mm.arc(sx(24), sz(-14), 7, 0, Math.PI * 2); mm.fill();
+    mm.beginPath(); mm.arc(sx(24), sz(-14), 5, 0, Math.PI * 2); mm.fill();
     mm.fillStyle = '#111'; mm.fillText('A', sx(24), sz(-14));
     mm.fillStyle = '#37c8ab';
-    mm.beginPath(); mm.arc(sx(-24), sz(-14), 7, 0, Math.PI * 2); mm.fill();
+    mm.beginPath(); mm.arc(sx(-24), sz(-14), 5, 0, Math.PI * 2); mm.fill();
     mm.fillStyle = '#111'; mm.fillText('B', sx(-24), sz(-14));
+    // Molten pools (E31): orange dots so the hazard reads on the map.
+    mm.fillStyle = '#ff7a18';
+    for (const p of world.pools || []) { mm.beginPath(); mm.arc(sx(p.x), sz(p.z), 3, 0, Math.PI * 2); mm.fill(); }
     // Bomb
     if (bomb && (bomb.state === 'planted' || bomb.state === 'dropped')) {
       mm.fillStyle = bomb.state === 'planted' ? '#ff3020' : '#f0a830';
@@ -217,26 +241,27 @@ export function createHud() {
       if (!e.alive) continue;
       mm.beginPath(); mm.arc(sx(e.pos.x), sz(e.pos.z), 3, 0, Math.PI * 2); mm.fill();
     }
-    // Player triangle
+    // Player triangle (dark on the light map, so it reads at a glance).
     const px = sx(playerPos.x), pz = sz(playerPos.z);
-    mm.fillStyle = '#fff';
+    mm.fillStyle = '#171a20';
     mm.save();
     mm.translate(px, pz);
     mm.rotate(Math.atan2(-Math.sin(yaw), -Math.cos(yaw)) + Math.PI);
     mm.beginPath(); mm.moveTo(0, -6); mm.lineTo(4, 5); mm.lineTo(-4, 5); mm.closePath(); mm.fill();
-    mm.restore();
+    mm.restore(); mm.restore();
   }
 
   function tick(dt) {
     if (hitTimer > 0) { hitTimer -= dt; if (hitTimer <= 0) el.hitmarker.classList.remove('on'); }
     if (bannerTimer > 0) { bannerTimer -= dt; if (bannerTimer <= 0) el.banner.className = ''; }
     if (toastTimer > 0) { toastTimer -= dt; if (toastTimer <= 0) el.toast.classList.remove('show'); }
+    if (calloutTimer > 0) { calloutTimer -= dt; if (calloutTimer <= 0) el.callout.className = ''; }
   }
 
   return {
-    setTimer, setScore, setMoney, setHealth, setWeapon, setAmmo, setReloading,
+    setTimer, setScore, setMoney, setHealth, setWeapon, setAmmo, setReloading, setGrenades,
     setCrosshairSpread, setBombStatus, setCompass, setScope,
-    hitmarker, flashDamage, flashWhite, banner, toast, showProgress,
+    hitmarker, flashDamage, flashWhite, banner, hideBanner, toast, callout, showProgress,
     killfeed, buildShop, showBuy, onBuy, setOverlay, hideOverlay, onPlay,
     showDeath, showMatchEnd, showScoreboard, updateMinimap, tick,
   };

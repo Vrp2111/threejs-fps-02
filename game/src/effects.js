@@ -21,7 +21,7 @@ export function createEffects(scene, glowTex) {
   }
   let tracerNext = 0;
 
-  // Sparks: one THREE.Points cloud with a fixed buffer, positions updated in place.
+  // Sparks: one THREE.Points cloud, fixed buffer, updated in place.
   const sparkGeo = new THREE.BufferGeometry();
   const sparkPos = new Float32Array(SPARKS * 3);
   const sparkCol = new Float32Array(SPARKS * 3);
@@ -38,8 +38,8 @@ export function createEffects(scene, glowTex) {
   const sparkLife = new Float32Array(SPARKS);
   let sparkNext = 0;
 
-  // Smoke puffs: sprites that grow and fade. Each smoke is a blocker for bot
-  // vision while alive (its centre + radius are read by bots.js).
+  // Smoke puffs: sprites that grow and fade; each blocks bot vision
+  // while alive (centre + radius read by bots.js).
   const smokes = [];
   for (let i = 0; i < SMOKES; i++) {
     const mat = new THREE.SpriteMaterial({ map: glowTex, color: 0x9aa0a8, transparent: true, opacity: 0, depthWrite: false });
@@ -66,6 +66,9 @@ export function createEffects(scene, glowTex) {
 
   const tmpA = new THREE.Vector3();
   const tmpB = new THREE.Vector3();
+  const tmpColor = new THREE.Color(); // one colour, reused: impact() used
+  // to make a new THREE.Color per spark, which is an allocation per shot
+  // in the hot loop.
 
   function tracer(from, to, color) {
     const t = tracers[tracerNext];
@@ -93,8 +96,8 @@ export function createEffects(scene, glowTex) {
       sparkVel[i * 3 + 1] = 1 + Math.random() * 3;
       sparkVel[i * 3 + 2] = Math.sin(a) * sp;
       sparkLife[i] = 0.35 + Math.random() * 0.25;
-      const c = new THREE.Color(colorHex || 0xffc46a);
-      sparkCol[i * 3] = c.r; sparkCol[i * 3 + 1] = c.g; sparkCol[i * 3 + 2] = c.b;
+      tmpColor.setHex(colorHex || 0xffc46a);
+      sparkCol[i * 3] = tmpColor.r; sparkCol[i * 3 + 1] = tmpColor.g; sparkCol[i * 3 + 2] = tmpColor.b;
     }
     sparkGeo.attributes.position.needsUpdate = true;
     sparkGeo.attributes.color.needsUpdate = true;

@@ -18,19 +18,21 @@ function speckle(ctx, w, h, n, alpha, dark) {
 
 function makeGround() {
   const [c, ctx] = canvas(512, 512);
-  ctx.fillStyle = '#2e2f33'; ctx.fillRect(0, 0, 512, 512);
+  // Light sun-bleached concrete: must read in a screenshot, not swallow
+  // the light. Speckles, joints, lane paint stay bright.
+  ctx.fillStyle = '#6a6d70'; ctx.fillRect(0, 0, 512, 512);
   speckle(ctx, 512, 512, 5200, 0.10, false);
   speckle(ctx, 512, 512, 3600, 0.12, true);
   // expansion joints
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 3;
   for (let i = 0; i <= 4; i++) {
     ctx.beginPath(); ctx.moveTo(i * 128, 0); ctx.lineTo(i * 128, 512); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(0, i * 128); ctx.lineTo(512, i * 128); ctx.stroke();
   }
   // faded lane paint
-  ctx.fillStyle = 'rgba(240,168,48,0.5)';
+  ctx.fillStyle = 'rgba(240,168,48,0.75)';
   ctx.fillRect(248, 40, 16, 90); ctx.fillRect(248, 200, 16, 90); ctx.fillRect(248, 360, 16, 90);
-  ctx.fillStyle = 'rgba(77,163,255,0.4)';
+  ctx.fillStyle = 'rgba(77,163,255,0.6)';
   ctx.fillRect(60, 250, 90, 12); ctx.fillRect(360, 250, 90, 12);
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(8, 6);
@@ -65,7 +67,7 @@ function makeContainer(base, rust) {
 
 function makeCrate() {
   const [c, ctx] = canvas(128, 128);
-  ctx.fillStyle = '#8a6b46'; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#a8875c'; ctx.fillRect(0, 0, 128, 128);
   ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 6;
   ctx.strokeRect(3, 3, 122, 122);
   ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(128, 128); ctx.moveTo(128, 0); ctx.lineTo(0, 128);
@@ -81,7 +83,7 @@ function makeCrate() {
 
 function makeWall() {
   const [c, ctx] = canvas(256, 256);
-  ctx.fillStyle = '#7a7d82'; ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = '#b8b3a6'; ctx.fillRect(0, 0, 256, 256);
   speckle(ctx, 256, 256, 2600, 0.09, true);
   speckle(ctx, 256, 256, 1600, 0.07, false);
   ctx.fillStyle = 'rgba(0,0,0,0.18)';

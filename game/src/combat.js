@@ -1,8 +1,8 @@
-// One hitscan routine for every shot in the game, player or bot. A shot is a
-// ray against the world's boxes, the ground plane and every living bot's two
-// hitboxes: a head sphere (more damage) and a body box. It returns the nearest
-// hit, so a crate between you and a target really does save them. The result
-// object is reused — callers copy the point out before the next shot.
+// One hitscan routine for every shot, player or bot: a ray against the
+// world's boxes, the ground and every living bot's two hitboxes (head
+// sphere, more damage; body box). Returns the nearest hit, so a crate
+// between you and a target really saves them. The result object is
+// reused; callers copy the point out before the next shot.
 import { rayBox } from './util.js';
 
 export function createCombat(world) {

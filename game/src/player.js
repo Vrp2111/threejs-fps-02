@@ -1,4 +1,4 @@
-// The human player: acceleration movement with crouch and jump, AABB collision
+// Human player: accel movement with crouch and jump, AABB collision
 // resolved one axis at a time, and a camera with recoil kick and head bob.
 // Movement numbers live in config.js; this file only moves the body.
 import * as THREE from 'three';
@@ -16,7 +16,7 @@ export function createPlayer(world, audio) {
     kills: 0, deaths: 0, assists: 0,
     weapons: { primary: null, side: null },
     slot: 'side',
-    grenades: { frag: 0, smoke: 0, flash: 0 },
+    grenades: { frag: 0, smoke: 0, flash: 0, lava: 0 },
     recoilPitch: 0, recoilYaw: 0,
     bobPhase: 0, stepAcc: 0, landDip: 0,
     spectating: null,
@@ -68,7 +68,7 @@ export function createPlayer(world, audio) {
   function update(dt, input) {
     if (!state.alive) return;
     const sin = Math.sin(state.yaw), cos = Math.cos(state.yaw);
-    // Wish direction in world space (yaw 0 faces -Z; spawn yaw PI faces +Z... see note).
+    // Wish dir in world space (yaw 0 faces -Z; spawn yaw PI faces +Z).
     let ix = 0, iz = 0;
     if (input.forward) iz -= 1;
     if (input.back) iz += 1;

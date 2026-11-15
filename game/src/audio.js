@@ -1,5 +1,5 @@
 // Procedural sound: every effect is synthesized with WebAudio, no audio files.
-// One AudioContext, created on the first user gesture; all nodes are short-lived
+// One AudioContext, created on first user gesture; all nodes short-lived
 // except the quiet wind loop. Master gain keeps the mix under control.
 export function createAudio() {
   let ctx = null;
@@ -67,6 +67,7 @@ export function createAudio() {
     const att = 1 / (1 + dist * 0.055);
     const vol = 0.55 * att + 0.06;
     if (kind === 'sniper') { noiseBurst(0.28, 'lowpass', 900, vol); tone(160, 0.22, 'sine', vol * 0.8, 55); }
+    else if (kind === 'dmr') { noiseBurst(0.2, 'bandpass', 1100, vol); tone(150, 0.18, 'sine', vol * 0.75, 60); }
     else if (kind === 'shotgun') { noiseBurst(0.22, 'bandpass', 700, vol); tone(120, 0.16, 'sine', vol * 0.7, 50); }
     else if (kind === 'rifle') { noiseBurst(0.12, 'bandpass', 1400, vol); tone(190, 0.09, 'square', vol * 0.22, 90); }
     else if (kind === 'smg') { noiseBurst(0.09, 'bandpass', 1800, vol * 0.85); }

@@ -1,5 +1,5 @@
-// The player's arsenal: one state object per weapon, the spread/recoil model
-// the judge asks for, and grenade projectiles with bounce physics. Bots fire
+// Player arsenal: one state object per weapon, spread/recoil model,
+// grenade projectiles with bounce physics. Bots fire
 // through combat.js directly with their own aim model (see bots.js).
 import * as THREE from 'three';
 import { WEAPONS } from './config.js';
@@ -7,13 +7,15 @@ import { WEAPONS } from './config.js';
 const DEG = Math.PI / 180;
 
 export function createWeaponSet(camera, audio, effects) {
-  // Viewmodel: a gun built from boxes, parented to the camera.
+  // Viewmodel: a gun built from boxes, parented to the camera. The
+  // materials are mid-grey with a warm accent stripe, so the gun reads
+  // against a bright yard instead of vanishing into a black blob.
   const view = new THREE.Group();
   camera.add(view);
-  const matDark = new THREE.MeshStandardMaterial({ color: 0x1c1e22, roughness: 0.45, metalness: 0.7 });
-  const matMid = new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.5, metalness: 0.6 });
-  const matWood = new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.8, metalness: 0.1 });
-  const matAccent = new THREE.MeshStandardMaterial({ color: 0xf0a830, roughness: 0.4, metalness: 0.5 });
+  const matDark = new THREE.MeshStandardMaterial({ color: 0x5a616d, roughness: 0.45, metalness: 0.15 });
+  const matMid = new THREE.MeshStandardMaterial({ color: 0x8b929e, roughness: 0.5, metalness: 0.15 });
+  const matWood = new THREE.MeshStandardMaterial({ color: 0x8a6238, roughness: 0.8, metalness: 0.1 });
+  const matAccent = new THREE.MeshStandardMaterial({ color: 0xf0a830, roughness: 0.4, metalness: 0.2 });
   const parts = {};
   let muzzle = null;
 
@@ -31,21 +33,31 @@ export function createWeaponSet(camera, audio, effects) {
     const len = def.id === 'pistol' ? 0.34 : def.id === 'shotgun' ? 0.72 : long ? 0.78 : 0.6;
     // receiver + barrel + grip + magazine + sight, scaled per weapon
     add(box, matDark, 0, 0, 0, 0.09, 0.11, len * 0.62);
-    add(cyl, matMid, 0, 0.012, -len * 0.62, 0.028, 0.028, len * 0.7).rotation.x = Math.PI / 2;
+    add(cyl, matMid, 0, 0.012, -len * 0.62, 0.028, len * 0.7, 0.028).rotation.x = Math.PI / 2;
     add(box, matWood, 0, -0.085, 0.06, 0.07, 0.12, 0.09).rotation.x = 0.25;
     if (def.id !== 'pistol') add(box, matDark, 0, -0.12, -0.08, 0.06, 0.16, 0.07).rotation.x = -0.12;
     add(box, matDark, 0, 0.075, -0.05, 0.03, 0.05, 0.22);
     if (def.id === 'sniper') {
-      add(cyl, matDark, 0, 0.1, -0.1, 0.035, 0.035, 0.3).rotation.x = Math.PI / 2;
+      add(cyl, matDark, 0, 0.1, -0.1, 0.035, 0.3, 0.035).rotation.x = Math.PI / 2;
       add(box, matAccent, 0, 0.062, 0.1, 0.05, 0.02, 0.1);
+    } else if (def.id === 'dmr') {
+      // The DMR wears a long scope and a bipod lug: it reads as the
+      // precision rifle at a glance, not a second rifle.
+      add(cyl, matDark, 0, 0.1, -0.12, 0.032, 0.34, 0.032).rotation.x = Math.PI / 2;
+      add(box, matAccent, 0, 0.062, 0.1, 0.05, 0.02, 0.12);
+      add(box, matMid, 0, -0.09, -0.3, 0.04, 0.1, 0.04);
     } else if (def.id === 'rifle') {
       add(box, matAccent, 0, 0.062, 0.08, 0.05, 0.02, 0.08);
     }
-    if (def.id === 'shotgun') add(cyl, matWood, 0, -0.02, -len * 0.5, 0.035, 0.035, len * 0.5).rotation.x = Math.PI / 2;
+    if (def.id === 'shotgun') add(cyl, matWood, 0, -0.02, -len * 0.5, 0.035, len * 0.5, 0.035).rotation.x = Math.PI / 2;
     muzzle = new THREE.Object3D();
     muzzle.position.set(0, 0.01, -len * 0.95);
     g.add(muzzle);
-    g.position.set(0.26, -0.24, -0.5);
+    // Small and low-right, like a real FPS viewmodel: at 0.8 scale, 0.55 m
+    // out it reads as a rifle in the hands, not a black slab. Metalness
+    // under 0.2 so the gun renders grey, not near-black with no env map.
+    g.scale.setScalar(0.8);
+    g.position.set(0.22, -0.28, -0.55);
     view.add(g);
     parts.group = g;
   }
@@ -102,9 +114,9 @@ export function createWeaponSet(camera, audio, effects) {
     current.bloom = Math.max(0, current.bloom - dt * 2.2);
     kick = Math.max(0, kick - dt * 7);
     if (parts.group) {
-      parts.group.position.z = -0.5 + kick * 0.09 + adsAmount * -0.12;
-      parts.group.position.x = 0.26 - adsAmount * 0.26;
-      parts.group.position.y = -0.24 + adsAmount * 0.075;
+      parts.group.position.z = -0.55 + kick * 0.09 + adsAmount * -0.12;
+      parts.group.position.x = 0.22 - adsAmount * 0.22;
+      parts.group.position.y = -0.28 + adsAmount * 0.075;
       parts.group.rotation.x = kick * 0.12;
     }
   }
@@ -120,8 +132,8 @@ export function createWeaponSet(camera, audio, effects) {
     return s;
   }
 
-  // Fire one trigger pull. Returns a summary for the HUD/killfeed, or null
-  // when the weapon cannot fire. `shoot` is combat.raycast bound by main.js.
+  // Fire one trigger pull. Returns a HUD/killfeed summary, or null when
+  // it cannot fire. `shoot` is combat.raycast bound by main.js.
   function fire(now, origin, dir, moveSpeed, airborne, ads, shoot, selfId) {
     if (!ready(now) || current.mag <= 0) { if (current.mag <= 0) audio.dryFire(); return null; }
     current.lastShot = now;
@@ -161,7 +173,7 @@ export function createWeaponSet(camera, audio, effects) {
     return { hit: hitAny, killed, headshot, damage: totalDmg };
   }
 
-  // ---- Grenades ------------------------------------------------------------
+  // Grenades
   const grenades = [];
   const GRAV = 13;
   function throwGrenade(type, origin, dir, power) {

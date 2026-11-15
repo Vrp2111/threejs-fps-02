@@ -1,11 +1,15 @@
-// Match flow: freeze time, live rounds, bomb plant/defuse, economy, and the
-// score. One object owns the phase machine; main.js owns input and rendering.
-// The player carries the bomb: if they die it drops and the nearest living
-// Vanguard bot retrieves it and plants.
-import { MATCH, ECONOMY, WEAPONS, GEAR, SITES, SPAWNS } from './config.js';
+// Match flow: freeze, live rounds, plant/defuse, economy, score. The player
+// carries the bomb; on death it drops and the nearest Vanguard bot fetches it.
+import { MATCH, ECONOMY, WEAPONS, GEAR, SITES, SPAWNS, POOL_DPS, POOLS } from './config.js';
+import { inPool, outOfPools, pushOut } from './util.js';
+import { createTactics } from './tactics.js';
 
 export function createGame(deps) {
   const { player, bots, weapons, effects, audio, hud, world, combat } = deps;
+  // Radio callouts go to the HUD and the killfeed story.
+  const tactics = createTactics({
+    onCallout: (line, team) => { hud.callout(line, team); },
+  });
   const state = {
     phase: 'menu', // menu | freeze | live | roundEnd | matchEnd
     round: 0,
@@ -15,6 +19,8 @@ export function createGame(deps) {
     attackSite: 'A',
     bomb: { state: 'none', carrier: null, site: null, x: 0, z: 0, fuse: 0, beepAt: 0 },
     playerPlant: 0, playerDefuse: 0,
+    hazardAt: 0,
+    idleX: 0, idleZ: 0, idleAt: 0, idleDrop: null, // X11 anchor
     spectate: null,
     mvp: null,
     roundEndAt: 0,
@@ -38,19 +44,27 @@ export function createGame(deps) {
 
   function startRound() {
     state.round++;
-    state.attackSite = Math.random() < 0.5 ? 'A' : 'B';
+    // The plan picks the site and defence; bots announce both.
+    const now = deps.now ?? 0;
+    const attack = tactics.pickAttack(state.round, state.score.vanguard, state.score.hollow, now);
+    const defense = tactics.pickDefense(state.round, state.score.hollow, state.score.vanguard);
+    state.attackSite = attack.site;
     deps.attackSite = state.attackSite;
-    bots.resetRound(state.round, state.attackSite);
+    deps.tactics = tactics;
+    bots.resetRound(state.round, state.attackSite, tactics);
+    const attackBot = bots.bots.find((b) => b.team === 'vanguard' && b.role === 'planter');
+    const defenseBot = bots.bots.find((b) => b.team === 'hollow' && b.role === 'holderA');
+    tactics.announce(attackBot, defenseBot);
     const spawn = SPAWNS.vanguard[4]; // bots take spawns 0-3; the player takes 4
     player.reset(spawn.x, spawn.z, spawn.yaw);
-    // Fresh kit each round: sidearm always, primary kept, ammo refilled.
+    // Fresh kit: sidearm always, primary kept, ammo refilled.
     weapons.equip('pistol');
     weapons.refill('pistol');
     if (ps.weapons.primary) { weapons.equip(ps.weapons.primary); weapons.refill(ps.weapons.primary); }
     else weapons.equip('pistol');
     ps.weapons.side = 'pistol';
     ps.armor = state.round === 1 ? 0 : ps.armor; // armor bought in the shop persists
-    ps.grenades = { frag: 0, smoke: 0, flash: 0 };
+    ps.grenades = { frag: 0, smoke: 0, flash: 0, lava: 0 };
     ps.hasKit = false;
     state.bomb = { state: 'carried', carrier: 'player', site: null, x: 0, z: 0, fuse: 0, beepAt: 0 };
     state.playerPlant = 0;
@@ -100,9 +114,26 @@ export function createGame(deps) {
     return false;
   }
 
+  // Lava grenade (E33): temp pool; never covers a node or bomb.
+  function spawnLavaPool(x, z) {
+    [x, z] = outOfPools(x, z);
+    for (const w of world.waypoints) [x, z] = pushOut(x, z, w.x, w.z, 2.5);
+    if (state.bomb.state === 'dropped') [x, z] = pushOut(x, z, state.bomb.x, state.bomb.z, 2.5);
+    const p = { x, z, r: 2, life: 18 };
+    POOLS.push(p);
+    world.addPool(p);
+  }
+
   function aliveCount(team) {
     let n = team === 'vanguard' && ps.alive ? 1 : 0;
     return n + bots.aliveCount(team);
+  }
+
+  // X1: carrier alive => round continues; timer caps it.
+  function carrierAlive() {
+    if (state.bomb.state !== 'carried') return false;
+    const c = state.bomb.carrier;
+    return c === 'player' ? ps.alive : !!(c && c.alive);
   }
 
   function checkRoundEnd() {
@@ -111,10 +142,12 @@ export function createGame(deps) {
     const hw = aliveCount('hollow');
     const planted = state.bomb.state === 'planted';
     if (!planted) {
+      // X1: defenders wiped but carrier lives.
+      if (hw === 0 && carrierAlive()) return;
       if (hw === 0) winRound('vanguard', 'Hollow team eliminated');
       else if (vg === 0) winRound('hollow', 'Vanguard team eliminated');
     } else if (hw === 0 && vg === 0) {
-      // Everyone dead after the plant: the bomb still decides it.
+      // Everyone dead after the plant: the bomb decides it.
     }
   }
 
@@ -169,6 +202,10 @@ export function createGame(deps) {
       }
     }
     hud.killfeed(killer, victim, headshot);
+    // The radio tells the round's story: a bot that scores calls it.
+    if (killer && killer.id !== 'player' && killer.team) {
+      tactics.eventCall('kill', killer, state.attackSite);
+    }
     // Bomb handoff: the planter bot died while carrying.
     if (state.bomb.state === 'carried' && state.bomb.carrier === victim) {
       dropBomb(victim.pos.x, victim.pos.z);
@@ -177,9 +214,11 @@ export function createGame(deps) {
   }
 
   function dropBomb(x, z) {
+    // A charge in lava is unretrievable, so it lands at the rim.
+    const [ex, ez] = outOfPools(x, z);
     state.bomb.state = 'dropped';
     state.bomb.carrier = null;
-    state.bomb.x = x; state.bomb.z = z;
+    state.bomb.x = ex; state.bomb.z = ez;
     toast('Bomb dropped — a teammate will retrieve it');
   }
 
@@ -190,6 +229,8 @@ export function createGame(deps) {
 
   function onPlayerDamage(amount, attacker, headshot) {
     if (!ps.alive || state.phase !== 'live') return;
+    // X4: player carrier takes half damage.
+    if (state.bomb.state === 'carried' && state.bomb.carrier === 'player') amount *= 0.5;
     const died = player.damage(amount);
     hud.flashDamage();
     audio.hurt();
@@ -213,6 +254,9 @@ export function createGame(deps) {
     banner('BOMB PLANTED', `Site ${site} — hold it for ${MATCH.bombFuseSeconds} seconds.`, '');
     audio.plantStart();
     toast('Bomb planted — defend it');
+    // Retake order: a living defender hears the rotation call.
+    const rot = bots.bots.find((b) => b.team === 'hollow' && b.alive);
+    if (rot) tactics.eventCall('rotate', rot, site);
   }
 
   function onBotPlant(bot) {
@@ -224,10 +268,15 @@ export function createGame(deps) {
     banner('BOMB PLANTED', `Site ${state.attackSite} — ${bot.name} set the charge.`, '');
     audio.plantStart();
     toast('Bomb planted at Site ' + state.attackSite);
+    tactics.eventCall('plant', bot, state.attackSite);
+    // Retake order: a living defender hears the rotation call.
+    const rot = bots.bots.find((b) => b.team === 'hollow' && b.alive);
+    if (rot) tactics.eventCall('rotate', rot, state.attackSite);
   }
 
   function onBotDefuse(bot) {
     state.bomb.state = 'defused';
+    tactics.eventCall('defuse', bot, state.attackSite);
     winRound('hollow', `${bot.name} defused the charge`);
   }
 
@@ -238,13 +287,11 @@ export function createGame(deps) {
     audio.explode();
     deps.shake(1);
     const R = MATCH.bombRadius;
-    // Player
     const pd = Math.hypot(ps.pos.x - state.bomb.x, ps.pos.z - state.bomb.z);
     if (ps.alive && pd < R && !world.losBlocked(state.bomb.x, 0.6, state.bomb.z, ps.pos.x, 1.2, ps.pos.z)) {
       const dmg = Math.round(MATCH.bombDamage * (1 - pd / R));
       if (player.damage(dmg)) onKill({ id: 'player', name: 'You', team: 'vanguard', pos: ps.pos }, null, false);
     }
-    // Bots
     for (const b of bots.bots) {
       if (!b.alive) continue;
       const d = Math.hypot(b.pos.x - state.bomb.x, b.pos.z - state.bomb.z);
@@ -269,6 +316,7 @@ export function createGame(deps) {
       if (state.timer <= 0) {
         state.phase = 'live';
         state.timer = MATCH.roundSeconds;
+        state.idleX = ps.pos.x; state.idleZ = ps.pos.z; state.idleAt = now; state.idleDrop = null; // X11
         hud.showBuy(false);
         banner('GO', `Site ${state.attackSite} — plant the charge.`, '');
       }
@@ -282,7 +330,6 @@ export function createGame(deps) {
       }
       return;
     }
-    // live
     state.timer -= dt;
     hud.setTimer(state.bomb.state === 'planted' ? state.bomb.fuse : state.timer);
     if (state.bomb.state === 'planted') {
@@ -315,7 +362,25 @@ export function createGame(deps) {
       if (state.playerPlant > 0) { state.playerPlant = 0; hud.showProgress(0); }
     }
 
-    // Bomb retrieval: the nearest living Vanguard bot fetches a dropped charge.
+    // X11: idle player carrier drops the bomb so a bot can fetch it.
+    if (state.bomb.state === 'carried' && state.bomb.carrier === 'player' && ps.alive) {
+      const d = Math.hypot(ps.pos.x - state.idleX, ps.pos.z - state.idleZ);
+      if (d >= 1) { state.idleX = ps.pos.x; state.idleZ = ps.pos.z; state.idleAt = now; }
+      else if (now - state.idleAt >= 10) { state.idleDrop = { x: ps.pos.x, z: ps.pos.z }; dropBomb(ps.pos.x, ps.pos.z); }
+    } else {
+      state.idleX = ps.pos.x; state.idleZ = ps.pos.z; state.idleAt = now;
+      if (state.idleDrop && Math.hypot(ps.pos.x - state.idleDrop.x, ps.pos.z - state.idleDrop.z) >= 1) state.idleDrop = null;
+    }
+
+    // Bomb retrieval: nearest living Vanguard bot fetches a dropped charge;
+    // the player can also pick it up by walking over it.
+    if (state.bomb.state === 'dropped') {
+      if (ps.alive && !state.idleDrop && Math.hypot(ps.pos.x - state.bomb.x, ps.pos.z - state.bomb.z) < 1.4) {
+        state.bomb.state = 'carried';
+        state.bomb.carrier = 'player';
+        toast('You picked up the charge');
+      }
+    }
     if (state.bomb.state === 'dropped') {
       let best = null, bd = Infinity;
       for (const b of bots.bots) {
@@ -324,13 +389,26 @@ export function createGame(deps) {
         if (d < bd) { bd = d; best = b; }
       }
       if (best) {
+        for (const o of bots.bots) if (o !== best && o.role === 'planter') o.role = 'pusher';
         best.role = 'planter';
         const d = Math.hypot(best.pos.x - state.bomb.x, best.pos.z - state.bomb.z);
         if (d < 1.4) {
           state.bomb.state = 'carried';
           state.bomb.carrier = best;
+          state.idleDrop = null;
           toast(`${best.name} picked up the charge`);
         }
+      }
+    }
+    // Molten pools (E31): burn at POOL_DPS, ticked every 0.5 s.
+    state.hazardAt -= dt;
+    if (state.hazardAt <= 0) {
+      state.hazardAt = 0.5;
+      if (ps.alive && inPool(ps.pos.x, ps.pos.z)) onPlayerDamage(POOL_DPS / 2, null, false);
+      for (const b of bots.bots) if (b.alive && inPool(b.pos.x, b.pos.z)) bots.damageBot(b, POOL_DPS / 2, null, false);
+      for (let i = POOLS.length - 1; i >= 0; i--) {
+        const p = POOLS[i];
+        if (p.life !== undefined && (p.life -= 0.5) <= 0) { POOLS.splice(i, 1); world.delPool(p); }
       }
     }
     checkRoundEnd();
@@ -338,6 +416,6 @@ export function createGame(deps) {
 
   return {
     state, startMatch, startRound, buyItem, onKill, onPlayerDamage,
-    onBotPlant, onBotDefuse, update, inSite, explodeBomb,
+    onBotPlant, onBotDefuse, update, inSite, explodeBomb, tactics, spawnLavaPool,
   };
 }

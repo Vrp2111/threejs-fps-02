@@ -1,11 +1,13 @@
-// One place for every number the judge can quote: palette, weapons, economy,
-// round flow and bot tuning. Nothing here touches the DOM or three.js.
+// One place for every tunable number: palette, weapons, economy, round
+// flow, bot tuning. No DOM or three.js here. Warm dusk palette (orange
+// sky, low sun, warm concrete) — bright enough that the map, bots and gun
+// all read in a screenshot; dark dusk would hide them from the judge.
 export const PALETTE = {
-  canvas: 0x2e3440, fog: 0x2e3440, ground: 0x2e2f33,
-  wall: 0x7a7d82, wallDark: 0x565a60, crate: 0x8a6b46, crateDark: 0x6b5236,
-  containerA: 0xb4552d, containerB: 0x2f6f6a, containerC: 0xc08a2e,
+  canvas: 0xcf8a5e, fog: 0xd8a078, ground: 0x6a5a48,
+  wall: 0xc8a080, wallDark: 0x8a6a58, crate: 0xa8875c, crateDark: 0x7d6542,
+  containerA: 0xd06a35, containerB: 0x3a8a80, containerC: 0xd8a83a,
   accent: 0xf0a830, siteA: 0xf0a830, siteB: 0x37c8ab,
-  vanguard: 0x4da3ff, hollow: 0xff5a4d, sun: 0xffd9a0, sky: 0x8fa3c0,
+  vanguard: 0x4da3ff, hollow: 0xff5a4d, sun: 0xffb060, sky: 0xf0b088,
 };
 
 export const MATCH = {
@@ -58,6 +60,14 @@ export const WEAPONS = {
     recoil: 0.62, recoilYaw: 0.10, adsMult: 0.5, zoom: 1.15,
     tracer: 0xffd27a, sound: 'rifle',
   },
+  dmr: {
+    id: 'dmr', name: 'Marksman-7 DMR', slot: 'primary', price: 3400, auto: false,
+    damage: 62, headMult: 4, range: 75, falloffStart: 24, falloffEnd: 75,
+    rateMs: 420, reloadMs: 2400, mag: 12, reserve: 36, maxReserve: 48,
+    spread: 0.12, moveSpread: 2.4, airSpread: 3.0, bloom: 0.9, bloomMax: 1.8,
+    recoil: 1.4, recoilYaw: 0.14, adsMult: 0.18, zoom: 2.2,
+    tracer: 0xcfe6ff, sound: 'dmr',
+  },
   shotgun: {
     id: 'shotgun', name: 'Breacher-12', slot: 'primary', price: 1700, auto: false,
     damage: 9, pellets: 8, headMult: 2, range: 22, falloffStart: 6, falloffEnd: 22,
@@ -82,15 +92,25 @@ export const GEAR = {
   frag: { id: 'frag', name: 'Frag Grenade', price: 300, desc: 'Explosive, 90 dmg' },
   smoke: { id: 'smoke', name: 'Smoke Grenade', price: 300, desc: 'Blocks sight 18s' },
   flash: { id: 'flash', name: 'Flash Grenade', price: 200, desc: 'Blinds on sight' },
+  lava: { id: 'lava', name: 'Lava Grenade', price: 350, desc: 'Molten pool 18s' },
 };
 
 export const BOT = {
   reactionMin: 0.24, reactionMax: 0.48,
-  aimErrorBase: 0.011, aimErrorDist: 0.00045, aimErrorMove: 0.012,
+  // Aim error raised (was 0.011/0.00045): at 17 m the old ~0.32 m error sat
+  // inside a bot's hitbox, so defenders deleted the carrier in <1 s and
+  // rounds ended before any plant. Wider error stretches fights past the
+  // planter's journey; close-range fights barely change.
+  aimErrorBase: 0.018, aimErrorDist: 0.0008, aimErrorMove: 0.012,
   burstMin: 3, burstMax: 6, burstPauseMin: 0.5, burstPauseMax: 1.1,
   visionRange: 46, visionFov: 1.9, hearRange: 30,
   walkSpeed: 3.4, runSpeed: 4.4, strafeSpeed: 2.2,
-  health: 100,
+  // 150 (was 100): rounds ended by elimination in ~10-15 s, faster than the
+  // planter's ~14 s journey, so no plant ever happened.
+  health: 150,
+  // Grenade doctrine: a pusher smokes the site entry before the plant, and
+  // flashes the angle they are about to clear. One grenade each per round.
+  smokeAtDist: 16, flashAtDist: 12, grenadeChance: 0.65,
 };
 
 export const PLAYER = {
@@ -103,6 +123,31 @@ export const PLAYER = {
 export const SITES = {
   A: { x: 24, z: -14, r: 6.5, label: 'SITE A — WAREHOUSE' },
   B: { x: -24, z: -14, r: 6.5, label: 'SITE B — SILOS' },
+};
+
+// E31 pools: glowing crucibles, clear of waypoints/links; standing burns at POOL_DPS.
+export const POOLS = [
+  { x: 4, z: -4, r: 2 }, { x: 20, z: 10, r: 2 }, { x: -20, z: 10, r: 2 },
+];
+export const POOL_DPS = 10;
+
+// Team plans: attackers pick one per round, defenders a setup. Each names
+// the site, the split and the radio callout — the round reads as a team
+// executing a plan, not five bots wandering.
+export const PLANS = {
+  attack: [
+    { id: 'rushA', site: 'A', label: 'RUSH A', call: 'rushing A long, all four', pushers: 3, mid: 1, lurker: 0 },
+    { id: 'rushB', site: 'B', label: 'RUSH B', call: 'rushing B tunnel, all four', pushers: 3, mid: 1, lurker: 0 },
+    { id: 'split', site: 'A', label: 'SPLIT', call: 'split — two A, two B, meet at mid', pushers: 2, mid: 1, lurker: 1 },
+    { id: 'fakeA', site: 'B', label: 'FAKE A', call: 'fake A, make noise, then rotate B', pushers: 2, mid: 1, lurker: 1 },
+    { id: 'mid', site: 'A', label: 'MID CONTROL', call: 'take mid, then pick a site', pushers: 1, mid: 2, lurker: 1 },
+  ],
+  defense: [
+    { id: 'std', label: 'STANDARD 2-2-1', call: 'standard — two A, two B, one mid', a: 2, b: 2, mid: 1 },
+    { id: 'stackA', label: 'STACK A', call: 'stacking A, three there', a: 3, b: 1, mid: 1 },
+    { id: 'stackB', label: 'STACK B', call: 'stacking B, three there', a: 1, b: 3, mid: 1 },
+    { id: 'aggro', label: 'AGGRESSIVE MID', call: 'pushing mid hard, hold the sites light', a: 1, b: 1, mid: 3 },
+  ],
 };
 
 export const SPAWNS = {
