@@ -1,15 +1,12 @@
-// Bot AI: nine bots that walk waypoint routes, hold angles, hear gunfire,
-// plant/defuse, throw grenades on the push, and shoot in bursts with
-// human-like reaction and aim error. Roles come from the round's plan
-// (tactics.js), not a fixed assignment.
+// Bot AI: nine bots walk routes, hold angles, hear gunfire, plant/defuse,
+// throw grenades, shoot in bursts with human-like reaction/aim error.
 import * as THREE from 'three';
 import { BOT, WEAPONS, NAMES, SPAWNS, MATCH, POOLS } from './config.js';
 import { clamp, damp, inPool, outOfPools } from './util.js';
 
 const EYE = 1.45;
 
-// Module-level scratch lists: update() fills them in place instead of
-// allocating a fresh array per bot per frame (no new objects in hot loops).
+// Scratch lists: filled in place, no fresh arrays per bot per frame.
 const _hollowAlive = [];
 const _vanguardAlive = [];
 const _enemiesHollow = [];
@@ -24,9 +21,7 @@ export function createBots(ctx) {
   function buildMesh(team) {
     const g = new THREE.Group();
     const trim = team === 'vanguard' ? 0x4da3ff : 0xff5a4d;
-    // Bright team trim and a lighter suit: a bot must read as a person at
-    // 20 metres in a screenshot, not a dark smudge. The emissive trim is
-    // the team colour, visible even in shadow.
+    // Bright team trim: a bot must read as a person at 20 m, not a smudge.
     const suit = new THREE.MeshStandardMaterial({ color: 0x4a4e57, roughness: 0.8 });
     const trimMat = new THREE.MeshStandardMaterial({ color: trim, roughness: 0.4, emissive: trim, emissiveIntensity: 0.9 });
     const skin = new THREE.MeshStandardMaterial({ color: 0xb09a7a, roughness: 0.8 });
@@ -79,12 +74,12 @@ export function createBots(ctx) {
       investigate: null, investigateAt: 0,
       plantProgress: 0, defuseProgress: 0,
       blindUntil: 0, flashLevel: 0,
+      // X23: Hollow hit by Vanguard fire shoots at 0.6x rate till suppressedUntil.
+      suppressedUntil: 0, suppHits: 0,
       perceiveAt: Math.random() * 0.12,
       speed: BOT.walkSpeed,
       deathT: 0,
-      // Grenade doctrine: one smoke and one flash per round, spent while
-      // pushing a site. A pusher smokes the entry before the plant and
-      // flashes the angle they are about to clear.
+      // Grenade doctrine: one smoke + one flash per round, spent on the push.
       grenades: { smoke: 1, flash: 1 },
       smokedAt: -99, flashedAt: -99,
     };
@@ -108,10 +103,8 @@ export function createBots(ctx) {
     return best;
   }
 
-  // BFS over the waypoint graph. Direct-line shortcut: walk the straight
-  // segment when clear; the waypoint route runs through the centre where
-  // defenders hold (planter died walking ~40 m in). The direct diagonal
-  // is ~30 m, east of the centre. Sampled every 0.5 m against colliders.
+  // BFS over waypoints. Direct-line shortcut when clear; the waypoint
+  // route runs through the centre where defenders hold.
   function lineClear(x1, z1, x2, z2) {
     const dx = x2 - x1, dz = z2 - z1;
     const d = Math.hypot(dx, dz);
@@ -174,7 +167,17 @@ export function createBots(ctx) {
     b.walkPhase += dt * 9;
   }
 
-  function setPath(b, x, z) {
+  function setPath(b, x, z, force) {
+    // X24 nav-fix X3: route commitment — keep the path when the dest is
+    // unchanged (within 0.01) and the line to the waypoint is clear; else
+    // nearest-node flips across z=-12 (wp5 (0,-8) <-> wp20 (0,-16)).
+    if (!force && b.path && b.pathI < b.path.length) {
+      const last = b.path[b.path.length - 1];
+      if (Math.abs(last.x - x) < 0.01 && Math.abs(last.z - z) < 0.01) {
+        const t = b.path[b.pathI];
+        if (lineClear(b.pos.x, b.pos.z, t.x, t.z)) return;
+      }
+    }
     b.path = findPath(b.pos.x, b.pos.z, x, z);
     b.pathI = 0;
   }
@@ -189,15 +192,14 @@ export function createBots(ctx) {
     moveBot(b, dt, dx / d, dz / d);
     b.yaw = dampAngle(b.yaw, Math.atan2(-dx, -dz), 8, dt);
     // Stuck detection: the line to the next waypoint can cross a collider
-    // once the bot drifts off its link (links validated, position not).
-    // Stuck a second, it replans. E22: findPath routes via the nearest
-    // node when the first waypoint is unreachable (carrier wedged 76 s on the (18,-14) crate).
+    // once the bot drifts off its link. Stuck a second, it replans (E22:
+    // carrier wedged 76 s on the (18,-14) crate).
     const moved = Math.hypot(b.pos.x - ox, b.pos.z - oz);
     if (moved < 0.01) {
       b.stuckSteps = (b.stuckSteps || 0) + 1;
       if (b.stuckSteps > 60) {
         b.stuckSteps = 0;
-        setPath(b, t.x, t.z);
+        setPath(b, t.x, t.z, true); // X24: forced replan bypasses route commitment
       }
     } else {
       b.stuckSteps = 0;
@@ -238,8 +240,7 @@ export function createBots(ctx) {
       if (!canSee(b, e, now)) continue;
       // Anti-focus-fire: spread targets. Without it every bot picks the
       // same nearest enemy and deletes it in <1 s (carrier died 0.75 s
-      // after pickup to three focusers). An engaged enemy costs +15 m,
-      // so the third bot peels off to a different target.
+      // after pickup). Engaged enemy costs +15 m.
       let focusCount = 0;
       for (let i = 0; i < bots.length; i++) {
         const o = bots[i];
@@ -281,13 +282,16 @@ export function createBots(ctx) {
       return;
     }
     if (now < b.nextShotAt) return;
+    // X23: suppressed bot shoots at 0.6x rate — interval AND burst pause
+    // stretched x1.67 (per-shot only would cut DPS ~18%, pauses dominate).
+    const rateMul = now < b.suppressedUntil ? 1.67 : 1;
     if (b.burstLeft <= 0) {
       b.burstLeft = BOT.burstMin + Math.floor(Math.random() * (BOT.burstMax - BOT.burstMin));
-      b.nextShotAt = now + BOT.burstPauseMin + Math.random() * (BOT.burstPauseMax - BOT.burstPauseMin);
+      b.nextShotAt = now + (BOT.burstPauseMin + Math.random() * (BOT.burstPauseMax - BOT.burstPauseMin)) * rateMul;
       return;
     }
     b.burstLeft--;
-    b.nextShotAt = now + w.def.rateMs / 1000;
+    b.nextShotAt = now + w.def.rateMs / 1000 * rateMul;
     w.mag--;
     const targetSpeed = target.vel ? Math.hypot(target.vel.x, target.vel.z) : 0;
     const dist = Math.hypot(target.pos.x - b.pos.x, target.pos.z - b.pos.z);
@@ -318,6 +322,14 @@ export function createBots(ctx) {
     if (bot.id === 'player') { ctx.onPlayerDamage(dmg, attacker, headshot); return; }
     // X4: carrier takes half damage (E18 failed pre-X1; works post-X1, round stays open).
     if (bot.team === 'vanguard' && bot.role === 'planter') dmg *= 0.5;
+    // X23 suppression: Hollow hit by Vanguard fire is suppressed 2.5 s
+    // (refreshed per hit), shoots at 0.6x rate — cuts total crossfire
+    // (X21: killing one defender faster only reallocates damage; X22:
+    // 100% of carrier non-fatal damage lands in z in (-4,4]). One-sided.
+    if (bot.team === 'hollow' && attacker && attacker.team === 'vanguard') {
+      bot.suppressedUntil = ctx.now + 2.5;
+      bot.suppHits++;
+    }
     let rest = dmg;
     if (bot.armor > 0) { const ab = Math.min(bot.armor, dmg * 0.5); bot.armor -= ab; rest = dmg - ab; }
     bot.health -= rest;
@@ -356,9 +368,7 @@ export function createBots(ctx) {
     }
   }
 
-  // Roles come from the round's plan (tactics.js), not a fixed table: the
-  // plan's split names the pushers/mids/lurker, the defence setup the
-  // holders per site. A bot missing from the plan falls back to pusher.
+  // Roles come from the round's plan (tactics.js); a bot missing from the plan falls back to pusher.
   function assignRoundRoles(roundNumber, attackSite, tactics) {
     const attackers = bots.filter((b) => b.team === 'vanguard');
     const defenders = bots.filter((b) => b.team === 'hollow');
@@ -413,9 +423,7 @@ export function createBots(ctx) {
     assignRoundRoles(roundNumber, attackSite, tactics);
   }
 
-  // A bot throws a grenade at a target point: the throw is the same
-  // projectile the player throws (weapons.throwGrenade via ctx), so the
-  // physics, the bounce and the event are shared, not a second system.
+  // Bot grenade = the same projectile the player throws (shared physics, bounce, event).
   const _throwDir = new THREE.Vector3();
   const _throwEye = new THREE.Vector3();
   function throwBotGrenade(b, type, tx, ty, tz) {
@@ -442,10 +450,9 @@ export function createBots(ctx) {
     }
     const hollowAlive = _hollowAlive;
     const vanguardAlive = _vanguardAlive;
-    // Designated defuser: the nearest living Hollow bot to a planted bomb
-    // (recomputed every step; 5 bots, cheap). Only the defuser gets
-    // objective priority when the bomb is planted; without one, every
-    // defender fights instead of defusing; round never ends by defuse.
+    // Designated defuser: nearest living Hollow bot to a planted bomb.
+    // Only the defuser gets objective priority when planted, else the
+    // round never ends by defuse.
     let defuser = null;
     if (bomb.state === 'planted') {
       let bd = Infinity;
@@ -479,10 +486,8 @@ export function createBots(ctx) {
       perceive(b, now, enemies);
 
       const blinded = now < b.blindUntil;
-      // Grenade doctrine: a pusher smokes the site entry as they close in
-      // and flashes the angle ahead, target or not. The old version only
-      // ran target-less, so a pusher never threw at a defended site (zero
-      // fires in five matches). One smoke + one flash per round.
+      // Grenade doctrine: pusher smokes the entry and flashes the angle
+      // ahead, target or not (old version only ran target-less: zero fires).
       if (phase === 'live' && !blinded && b.role === 'pusher' && b.team === 'vanguard' && now > 4) {
         const s = ctx.attackSite === 'A' ? { x: 24, z: -14 } : { x: -24, z: -14 };
         const dSite = Math.hypot(s.x - b.pos.x, s.z - b.pos.z);
@@ -498,23 +503,18 @@ export function createBots(ctx) {
           }
         }
       }
-      // Objective advance (FSM priority): planter + defuser keep moving to
-      // the objective under fire; combat preempts only when an enemy is
-      // < 8 m. Without this, a bot with ANY visible target never advances
-      // (46 m vision), so rounds ended by elimination, bomb never planted.
-      // Planter needs ~14 s; the objective must outrank distant fire.
+      // Objective advance (FSM priority): planter/defuser keep moving under
+      // fire; combat preempts only < 8 m, else rounds end by elimination.
       const targetDist = b.target ? Math.hypot(b.target.pos.x - b.pos.x, b.target.pos.z - b.pos.z) : Infinity;
       const isPlanter = b.role === 'planter' && b.team === 'vanguard';
       const carrying = isPlanter && bomb.state === 'carried' && bomb.carrier === b;
       const retrieving = isPlanter && bomb.state === 'dropped';
-      // Escort: a Vanguard bot that is not the carrier stays with it.
-      // Without an escort the planter walks alone into 2-3 defenders
-      // and dies in <1 s; with the team around it they face five targets.
+      // Escort: a Vanguard non-carrier stays with the carrier, else the
+      // planter walks alone into 2-3 defenders and dies in <1 s.
       const escorting = b.team === 'vanguard' && bomb.state === 'carried' && bomb.carrier && bomb.carrier !== b && bomb.carrier.alive;
       const advancing = phase === 'live' && !blinded && (carrying || retrieving || b === defuser || escorting) && targetDist > 8;
-      // Objective pace: the planter and defuser RUN (4.4 m/s) instead of
-      // walking (3.4 m/s). Walking, the planter's ~40 m journey took ~12 s
-      // and the round ended by elimination first; running cuts it to ~9 s.
+      // Objective pace: planter/defuser RUN (4.4 m/s) not walk (3.4 m/s) —
+      // walking, the ~40 m journey took ~12 s and rounds ended first.
       b.speed = advancing ? BOT.runSpeed : BOT.walkSpeed;
       // Combat has priority over everything except planting/defusing.
       if (b.target && !blinded && now >= b.reactAt && phase === 'live' && !advancing) {
@@ -553,9 +553,7 @@ export function createBots(ctx) {
             followPath(b, dt);
           }
         } else if (escorting) {
-          // Escort the carrier: stay within ~5 m so defenders face the
-          // whole team, not a lone planter. Re-path every second (the
-          // carrier keeps moving); combat still preempts at close range.
+          // Escort: stay within ~5 m so defenders face the whole team, not a lone planter.
           const c = bomb.carrier;
           const d = Math.hypot(c.pos.x - b.pos.x, c.pos.z - b.pos.z);
           if (d > 5) {
@@ -591,9 +589,7 @@ export function createBots(ctx) {
           if (followPath(b, dt)) b.investigate = null;
         } else if (b.role === 'mid' || b.role === 'pusher' || b.role === 'planter' || b.role === 'lurker') {
           // Push: the plan names where each role goes (tactics.roleTarget).
-          // Attackers go to their site, mid roams the centre, the lurker
-          // watches the other site and rotates with the plan. A fake sends
-          // pushers to the decoy site until it breaks, then they rotate.
+          // A fake sends pushers to the decoy site until it breaks.
           let tx, tz;
           if (ctx.tactics) {
             const t = ctx.tactics.roleTarget(b.role, b.team, now);
@@ -610,15 +606,11 @@ export function createBots(ctx) {
           followPath(b, dt);
         }
       }
-      // Objective advance: shoot on the move so the planter/defuser is
-      // not defenceless while pushing. (Combat still preempts when the
-      // target is close — see the `advancing` flag above.)
+      // Shoot on the move so the planter/defuser is not defenceless while pushing.
       if (advancing && b.target && now >= b.reactAt) shootAt(b, b.target, now, enemies);
 
-      // Separation: bots never stack. The push is collision-aware like
-      // moveBot: a raw push can shove a bot into a collider, and a bot
-      // inside one can never move out (every step is blocked while it
-      // overlaps) — a planter once spent a whole round wedged in a crate.
+      // Separation: bots never stack. A raw push can shove a bot into a
+      // collider it can never leave (every step blocked while overlapping).
       for (const o of bots) {
         if (o === b || !o.alive) continue;
         const dx = b.pos.x - o.pos.x, dz = b.pos.z - o.pos.z;
